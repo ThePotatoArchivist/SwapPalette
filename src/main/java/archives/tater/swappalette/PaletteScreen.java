@@ -1,20 +1,27 @@
 package archives.tater.swappalette;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.ContainerInput;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 
-@SuppressWarnings("NotNullFieldNotInitialized")
+import java.util.Locale;
+import java.util.stream.IntStream;
+
 public class PaletteScreen extends Screen {
     public static final int WIDTH = 300;
+    private final IntList resultSlots = new IntArrayList();
     private final Player player;
+    private String currentSearch = "";
+    @SuppressWarnings("NotNullFieldNotInitialized")
     private EditBox search;
-    private IntList resultSlots;
 
     public PaletteScreen(Component title, Player player) {
         super(title);
@@ -24,14 +31,43 @@ public class PaletteScreen extends Screen {
     @Override
     protected void init() {
         search = addRenderableWidget(new EditBox(font, (width - WIDTH) / 2, height / 2 - 20, WIDTH, 20, Component.empty()));
+        search.setCanLoseFocus(false);
+        search.setValue(currentSearch);
+        search.setResponder(this::onSearchChange);
 
         var y = height / 2;
-        var size = player.getInventory().getContainerSize();
-        for (var slot = 0; slot < size; slot++) {
-            if (player.getInventory().getItem(slot).isEmpty()) continue;
-            addRenderableWidget(new SearchResultWidget((width - WIDTH) / 2, y, WIDTH, 24, font, player, slot));
+        for (int slot : resultSlots) {
+            var stack = player.getInventory().getItem(slot);
+            addRenderableWidget(new SearchResultWidget((width - WIDTH) / 2, y, WIDTH, 24, font, stack, () -> onSelect(slot)));
             y += 24;
         }
+    }
+
+    private void onSearchChange(String s) {
+        if (currentSearch.equals(s)) return;
+        currentSearch = s;
+
+        resultSlots.clear();
+
+        var normSearch = currentSearch.toLowerCase(Locale.ROOT);
+        var inventory = player.getInventory();
+        var size = inventory.getContainerSize();
+        for (var slot = 0; slot < size; slot++) {
+            var stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && stack.getDisplayName().getString().toLowerCase(Locale.ROOT).contains(normSearch))
+                resultSlots.add(slot);
+        }
+
+        this.rebuildWidgets();
+    }
+
+    private void onSelect(int slot) {
+        var slots = player.inventoryMenu.slots;
+        Minecraft.getInstance().gameMode.handleContainerInput(player.inventoryMenu.containerId, IntStream.range(0, slots.size()).filter(menuSlotIndex -> {
+            var menuSlot = slots.get(menuSlotIndex);
+            return menuSlot.container == player.getInventory() && menuSlot.getContainerSlot() == slot;
+        }).findAny().orElseThrow(), player.getInventory().getSelectedSlot(), ContainerInput.SWAP, player);
+        onClose();
     }
 
     @Override
