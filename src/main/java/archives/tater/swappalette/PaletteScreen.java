@@ -10,20 +10,26 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ContainerInput;
 
-import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntImmutableList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import org.apache.commons.lang3.StringUtils;
+import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.List;
 import java.util.Locale;
-import java.util.stream.IntStream;
+import java.util.Objects;
 
+import static archives.tater.swappalette.ModUtil.comparingFloat;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static java.util.stream.IntStream.range;
 
 public class PaletteScreen extends Screen {
     public static final int WIDTH = 300;
-    private final IntList resultSlots = new IntArrayList();
+    private IntList resultSlots = IntList.of();
     private final Player player;
+    private final List<@Nullable String> stackNames;
     private String currentSearch = "";
     private int currentSelection = 0;
     @SuppressWarnings("NotNullFieldNotInitialized")
@@ -32,6 +38,13 @@ public class PaletteScreen extends Screen {
     public PaletteScreen(Component title, Player player) {
         super(title);
         this.player = player;
+
+        var inventory = player.getInventory();
+        stackNames = range(0, inventory.getContainerSize()).mapToObj(slot -> {
+            var stack = inventory.getItem(slot);
+            if (stack.isEmpty()) return null;
+            return stack.getHoverName().getString();
+        }).toList();
     }
 
     @Override
@@ -54,24 +67,32 @@ public class PaletteScreen extends Screen {
         if (currentSearch.equals(s)) return;
         currentSearch = s;
 
-        resultSlots.clear();
+        record SearchEntry(String name, int slot, float score) {}
 
         var normSearch = currentSearch.toLowerCase(Locale.ROOT);
-        var inventory = player.getInventory();
-        var size = inventory.getContainerSize();
-        for (var slot = 0; slot < size; slot++) {
-            var stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && stack.getDisplayName().getString().toLowerCase(Locale.ROOT).contains(normSearch))
-                resultSlots.add(slot);
-        }
+        resultSlots = IntImmutableList.toList(range(0, stackNames.size())
+                .mapToObj(slot -> {
+                    var name = stackNames.get(slot);
+                    if (name == null) return null;
+                    return new SearchEntry(name, slot, getScore(name, normSearch));
+                })
+                .filter(Objects::nonNull)
+                .sorted(comparingFloat(SearchEntry::score))
+                .mapToInt(SearchEntry::slot)
+        );
         currentSelection = 0;
 
         this.rebuildWidgets();
     }
 
+    @SuppressWarnings("deprecation")
+    private static float getScore(String name, String normSearch) {
+        return StringUtils.getLevenshteinDistance(name, normSearch);
+    }
+
     private void onSelect(int slot) {
         var slots = player.inventoryMenu.slots;
-        var menuSlotIndex = IntStream.range(0, slots.size()).filter(i -> {
+        var menuSlotIndex = range(0, slots.size()).filter(i -> {
             var menuSlot = slots.get(i);
             return menuSlot.container == player.getInventory() && menuSlot.getContainerSlot() == slot;
         }).findAny();
