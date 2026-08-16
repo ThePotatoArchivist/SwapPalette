@@ -1,5 +1,6 @@
 package archives.tater.swappalette;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
@@ -11,15 +12,20 @@ import net.minecraft.world.inventory.ContainerInput;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.Locale;
 import java.util.stream.IntStream;
+
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 
 public class PaletteScreen extends Screen {
     public static final int WIDTH = 300;
     private final IntList resultSlots = new IntArrayList();
     private final Player player;
     private String currentSearch = "";
+    private int currentSelection = 0;
     @SuppressWarnings("NotNullFieldNotInitialized")
     private EditBox search;
 
@@ -36,9 +42,10 @@ public class PaletteScreen extends Screen {
         search.setResponder(this::onSearchChange);
 
         var y = height / 2;
-        for (int slot : resultSlots) {
+        for (var i = 0; i < resultSlots.size(); i++) {
+            var slot = resultSlots.getInt(i);
             var stack = player.getInventory().getItem(slot);
-            addRenderableWidget(new SearchResultWidget((width - WIDTH) / 2, y, WIDTH, 24, font, stack, () -> onSelect(slot)));
+            addRenderableWidget(new SearchResultWidget(font, (width - WIDTH) / 2, y, WIDTH, 24, i == currentSelection, stack, () -> onSelect(slot)));
             y += 24;
         }
     }
@@ -57,17 +64,50 @@ public class PaletteScreen extends Screen {
             if (!stack.isEmpty() && stack.getDisplayName().getString().toLowerCase(Locale.ROOT).contains(normSearch))
                 resultSlots.add(slot);
         }
+        currentSelection = 0;
 
         this.rebuildWidgets();
     }
 
     private void onSelect(int slot) {
         var slots = player.inventoryMenu.slots;
-        Minecraft.getInstance().gameMode.handleContainerInput(player.inventoryMenu.containerId, IntStream.range(0, slots.size()).filter(menuSlotIndex -> {
-            var menuSlot = slots.get(menuSlotIndex);
+        var menuSlotIndex = IntStream.range(0, slots.size()).filter(i -> {
+            var menuSlot = slots.get(i);
             return menuSlot.container == player.getInventory() && menuSlot.getContainerSlot() == slot;
-        }).findAny().orElseThrow(), player.getInventory().getSelectedSlot(), ContainerInput.SWAP, player);
+        }).findAny();
+        if (menuSlotIndex.isEmpty()) return;
+
+        Minecraft.getInstance().gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlotIndex.getAsInt(), player.getInventory().getSelectedSlot(), ContainerInput.SWAP, player);
         onClose();
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        switch (event.key()) {
+            case InputConstants.KEY_UP -> selectPrevious();
+            case InputConstants.KEY_DOWN -> selectNext();
+            case InputConstants.KEY_TAB -> {
+                if ((event.modifiers() & GLFW.GLFW_MOD_SHIFT) == 0)
+                    selectNext();
+                else
+                    selectPrevious();
+            }
+            case InputConstants.KEY_RETURN -> {
+                onSelect(resultSlots.getInt(currentSelection));
+                return true;
+            }
+            default -> { return super.keyPressed(event); }
+        }
+        rebuildWidgets();
+        return true;
+    }
+
+    private void selectNext() {
+        currentSelection = min(resultSlots.size(), currentSelection + 1);
+    }
+
+    private void selectPrevious() {
+        currentSelection = max(0, currentSelection - 1);
     }
 
     @Override
@@ -83,11 +123,6 @@ public class PaletteScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
-    }
-
-    @Override
-    public boolean keyPressed(KeyEvent event) {
-        return super.keyPressed(event);
     }
 
     @Override
